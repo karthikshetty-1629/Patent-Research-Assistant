@@ -1,0 +1,13 @@
+# Keeps `sam build` (CodeUri: ..) from bundling non-Lambda content into
+# every function's deployment package.
+frontend/
+notebooks/
+docs/
+schemas/
+data_processing/*.ipynb
+.git/
+.venv/
+venv/
+data/
+*.parquet
+*.xml

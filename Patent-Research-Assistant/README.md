@@ -1,132 +1,180 @@
-# Patent-Research-Assistant
-RAG x LLM
-Patent Research Assistant
-Overview
-The Patent Research Assistant is a comprehensive full-stack application that leverages Retrieval-Augmented Generation (RAG) to make patent research more accessible and efficient. The system combines advanced Natural Language Processing techniques, domain-specific Large Language Models (LLMs), and a scalable vector database to enable efficient retrieval, analysis, and contextual understanding of patent data.
-Features
+# Patent Research Assistant
 
-Natural language patent search interface
-Voice recognition for queries
-Dark/light theme support
-Responsive design
-User authentication system
-Advanced patent data retrieval using RAG
-Vector-based similarity search
-Real-time patent analysis
+Retrieval-Augmented Generation (RAG) over USPTO full-text patent grants —
+ask a natural-language question, get an answer grounded in and cited to
+real patents.
 
-Technology Stack
+## Overview
 
-Frontend: HTML, CSS, JavaScript, Bootstrap
-Backend: Python, AWS Lambda
-Database: AWS OpenSearch
-AI/ML:
+The Patent Research Assistant ingests USPTO bulk patent-grant XML, converts
+it into semantic embeddings with a patent-domain language model
+(PatentSBERTa), indexes those embeddings for k-NN similarity search in
+OpenSearch, and answers user questions by retrieving the most relevant
+patents and passing them as grounding context to an LLM (Falcon-7B-Instruct
+by default). A lightweight web UI provides natural-language and voice
+search, with light/dark themes and email-based authentication.
 
-PatentSBERTa for embeddings
-Falcon 7B for text generation
-RAG implementation using LangChain
+```mermaid
+flowchart LR
+    A[USPTO XML] --> B[Parse + Clean]
+    B --> C[Parquet]
+    C --> D[PatentSBERTa\nEmbeddings]
+    D --> E[(OpenSearch\nk-NN Index)]
+    F([User question]) --> G[Retriever]
+    E --> G
+    G --> H[Falcon-7B]
+    H --> I([Grounded answer\n+ citations])
+```
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full sequence/topology
+diagrams and a module-by-module breakdown.
 
-Cloud Services:
+## Features
 
-AWS S3 for static hosting
-AWS Lambda for serverless computing
-AWS API Gateway
-AWS OpenSearch for vector search
-AWS CloudWatch for monitoring
+- Natural-language patent search with citations back to source patents
+- Voice search (Web Speech API) and dark/light theme, no page reload
+- Email sign-up / login backed by Amazon Cognito
+- Vector similarity search over patent titles, abstracts, and claims
+- Event-driven indexing: drop a new XML dump in S3 and it's searchable
+  within minutes, no manual re-index step
+- Fully parameterized offline pipeline: no hardcoded local paths, runs
+  identically on a laptop or in Lambda
 
+## Tech stack
 
+| Layer | Technology |
+|---|---|
+| Frontend | HTML, CSS, vanilla JS, Bootstrap 5 |
+| API | Amazon API Gateway (HTTP API) |
+| Compute | AWS Lambda (Python 3.11) |
+| Vector store | Amazon OpenSearch (k-NN) |
+| Embeddings | PatentSBERTa (`sentence-transformers`) |
+| Generation | Falcon-7B-Instruct (SageMaker / HF Inference / Bedrock) |
+| Orchestration | LangChain (`langchain-core` retriever interface) |
+| Auth | Amazon Cognito |
+| Storage | Amazon S3 (raw XML + static frontend hosting) |
+| IaC | AWS SAM (`infra/template.yaml`) |
 
-Project Structure
-Copyproject/
-├── frontend/
-│   ├── index.html          # Main landing page
-│   ├── signup.html         # User registration page
-│   ├── app.js             # Frontend JavaScript
-│   └── styles/            # CSS stylesheets
+## Repository structure
+
+```
+Patent-Research-Assistant/
+├── README.md
+├── docs/
+│   └── ARCHITECTURE.md          # Detailed diagrams + module map
+├── data_processing/              # Offline ingestion pipeline (CLI, no hardcoded paths)
+│   ├── download_to_s3.py         # USPTO bulk data -> S3
+│   ├── xml_splitter.py           # Concatenated dump -> individual XML docs
+│   ├── xml_validator.py          # Well-formedness check
+│   ├── xml_parser.py             # Shared cleaning + structured field extraction
+│   ├── xml_to_parquet.py         # Structured records -> Parquet
+│   ├── build_embeddings.py       # Parquet -> embeddings -> OpenSearch (batch)
+│   └── view_parquet.py           # Inspect parquet output
 ├── backend/
-│   ├── lambda_function.py  # AWS Lambda handler
-│   └── requirements.txt    # Python dependencies
-└── data_processing/
-    ├── XMLSplitter.py     # XML processing
-    ├── utility_parquet.py # Data transformation
-    └── embeddings.py      # Vector embedding generation
-Setup and Installation
-Prerequisites
+│   ├── config.py                 # Env-driven configuration
+│   ├── rag/
+│   │   ├── embeddings.py         # PatentSBERTa wrapper
+│   │   ├── opensearch_client.py  # Index mgmt + k-NN search
+│   │   ├── retriever.py          # LangChain retriever
+│   │   ├── llm.py                # Falcon-7B generation (pluggable backend)
+│   │   └── chain.py              # End-to-end RAG chain
+│   └── handlers/
+│       ├── search_handler.py     # POST /search
+│       ├── indexing_handler.py   # S3 event -> parse + embed + index
+│       └── auth_handler.py       # POST /auth/{signup,confirm,login}
+├── frontend/
+│   ├── index.html                # Search UI
+│   ├── signup.html / login.html  # Auth UI
+│   ├── css/styles.css
+│   └── js/{app,auth,config}.js
+├── infra/
+│   ├── template.yaml             # AWS SAM stack (S3, OpenSearch, Cognito, Lambdas, API)
+│   └── opensearch_index_mapping.json
+├── scripts/
+│   └── run_local_pipeline.sh     # split -> validate -> parquet -> embed, one command
+├── notebooks/                    # Historical bulk-download notebooks (1971-2000)
+├── schemas/
+│   └── us-patent-grant-v45-2014-04-03.dtd
+├── requirements.txt
+└── .env.example
+```
 
-AWS Account with appropriate permissions
-Python 3.8 or higher
-Node.js and npm (for development)
-AWS CLI configured
+## Quickstart: local pipeline (no AWS required for parsing/embeddings)
 
-Frontend Setup
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # fill in OPENSEARCH_ENDPOINT etc. if you have a cluster
 
-Clone the repository
-Navigate to the frontend directory
-Configure the API endpoint in app.js
-Deploy to S3:
+# End-to-end: split -> validate -> parquet -> embed + index
+./scripts/run_local_pipeline.sh /path/to/ipg231226.xml ./data
 
-bashCopyaws s3 sync . s3://your-bucket-name
-Backend Setup
+# Ask a question against the index you just built
+python -m backend.rag.chain "What patents describe solid-state battery electrolytes?"
+```
 
-Create a new Lambda function
-Install dependencies:
+Each stage can also be run independently, e.g.:
 
-bashCopypip install -r requirements.txt
+```bash
+python -m data_processing.xml_splitter --input ./ipg231226.xml --output-dir ./data/split
+python -m data_processing.xml_validator --input-dir ./data/split
+python -m data_processing.xml_to_parquet --input-dir ./data/split --output-dir ./data/parquet
+python -m data_processing.build_embeddings --parquet-dir ./data/parquet
+python -m data_processing.view_parquet --path ./data/parquet
+```
 
-Configure environment variables:
+## Quickstart: deploy the full AWS stack
 
-CopyOPENSEARCH_ENDPOINT=your-opensearch-endpoint
-REGION=your-aws-region
+Requires the [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
+and an AWS account.
 
-Deploy the Lambda function
-Set up API Gateway integration
+```bash
+cd infra
+sam build
+sam deploy --guided
+```
 
-OpenSearch Setup
+`sam deploy` prints outputs including `ApiBaseUrl`, `RawDataBucketName`, and
+`CognitoUserPoolId`. Then:
 
-Create an OpenSearch domain
-Configure index mappings for vector search
-Set up IAM roles and security policies
+1. Paste `ApiBaseUrl` into `frontend/js/config.js`.
+2. Sync the frontend: `aws s3 sync ../frontend s3://<FrontendBucketName>`.
+3. Upload a USPTO bulk XML file to `s3://<RawDataBucketName>/uspto/fulltext/` —
+   `IndexingFunction` fires automatically and indexes it.
+4. Deploy Falcon-7B-Instruct to a SageMaker real-time endpoint (or point
+   `LLM_PROVIDER=huggingface` at the HF Inference API for a no-GPU option),
+   and set `SAGEMAKER_ENDPOINT_NAME` accordingly.
 
-Usage
+## API reference
 
-Access the application through the S3 static website URL
-Create an account or login
-Use the search bar to input patent-related queries
-View patent results with relevance scoring
-Toggle between voice and text input as needed
+| Route | Method | Body | Response |
+|---|---|---|---|
+| `/search` | POST | `{"query": "..."}` | `{"answer": "...", "sources": [{"patent_id", "title", "publication_date", "relevance_score"}]}` |
+| `/auth/signup` | POST | `{"email", "password"}` | `{"message": "..."}` |
+| `/auth/confirm` | POST | `{"email", "code"}` | `{"message": "..."}` |
+| `/auth/login` | POST | `{"email", "password"}` | `{"access_token", "id_token", "refresh_token", "expires_in"}` |
 
-Data Processing Pipeline
-The system processes patent data through several stages:
+## Configuration
 
-XML file splitting
-Utility patent extraction
-Data transformation to parquet format
-Vector embedding generation
-OpenSearch indexing
+All configuration is environment-driven — see [.env.example](.env.example)
+for the full list (AWS region/bucket, OpenSearch endpoint, embedding model,
+LLM provider/model, retrieval `top_k`, Cognito pool/client).
 
-Monitoring and Maintenance
+## Roadmap
 
-Monitor application performance via CloudWatch
-Check Lambda execution logs for errors
-Review OpenSearch metrics for query performance
-Update embeddings periodically with new patent data
+- [ ] Citation-graph enrichment (patent-to-patent reference graph)
+- [ ] Inventor/assignee network analysis surfaced in the UI
+- [ ] Swap OpenSearch for a managed vector DB behind the same retriever interface
+- [ ] Add automated tests around `data_processing.xml_parser`
 
-Security Considerations
+## Contributing
 
-Implement proper authentication and authorization
-Use HTTPS for all API communications
-Follow AWS security best practices
-Regularly update dependencies
-Monitor for unusual access patterns
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
-Contributing
+## License
 
-Fork the repository
-Create a feature branch
-Commit your changes
-Push to the branch
-Create a Pull Request
-
-License
-This project is licensed under the MIT License - see the LICENSE file for details.
-Team
+MIT License — see [LICENSE](LICENSE).

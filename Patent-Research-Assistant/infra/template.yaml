@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Patent Research Assistant - serverless RAG backend.
+  Provisions the raw-data S3 bucket, Cognito user pool, OpenSearch domain,
+  and the three Lambda functions (search, indexing, auth) behind an HTTP API.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: patent-research-assistant
+  OpenSearchInstanceType:
+    Type: String
+    Default: t3.small.search
+  EmbeddingModelName:
+    Type: String
+    Default: AI-Growth-Lab/PatentSBERTa
+  LLMProvider:
+    Type: String
+    Default: sagemaker
+    AllowedValues: [huggingface, sagemaker, bedrock]
+  SageMakerEndpointName:
+    Type: String
+    Default: ""
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 60
+    MemorySize: 1024
+    Environment:
+      Variables:
+        AWS_REGION: !Ref AWS::Region
+        S3_BUCKET: !Ref RawDataBucket
+        OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+        OPENSEARCH_INDEX: patents
+        EMBEDDING_MODEL_NAME: !Ref EmbeddingModelName
+        LLM_PROVIDER: !Ref LLMProvider
+        SAGEMAKER_ENDPOINT_NAME: !Ref SageMakerEndpointName
+        COGNITO_USER_POOL_ID: !Ref UserPool
+        COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
+
+Resources:
+  # ---------------------------------------------------------------------
+  # Storage
+  # ---------------------------------------------------------------------
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-raw-${AWS::AccountId}"
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-frontend-${AWS::AccountId}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  # ---------------------------------------------------------------------
+  # Vector store
+  # ---------------------------------------------------------------------
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: !Sub "${ProjectName}-vectors"
+      EngineVersion: OpenSearch_2.11
+      ClusterConfig:
+        InstanceType: !Ref OpenSearchInstanceType
+        InstanceCount: 1
+      EBSOptions:
+        EBSEnabled: true
+        VolumeSize: 20
+        VolumeType: gp3
+      NodeToNodeEncryptionOptions:
+        Enabled: true
+      EncryptionAtRestOptions:
+        Enabled: true
+      DomainEndpointOptions:
+        EnforceHTTPS: true
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt SearchFunctionRole.Arn
+                - !GetAtt IndexingFunctionRole.Arn
+            Action: "es:ESHttp*"
+            Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ProjectName}-vectors/*"
+
+  # ---------------------------------------------------------------------
+  # Auth
+  # ---------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-users"
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "${ProjectName}-web-client"
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # ---------------------------------------------------------------------
+  # API
+  # ---------------------------------------------------------------------
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowHeaders: ["Content-Type", "Authorization"]
+        AllowMethods: ["GET", "POST", "OPTIONS"]
+
+  SearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ..
+      Handler: backend.handlers.search_handler.handler
+      Events:
+        Search:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /search
+            Method: post
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: "es:ESHttp*"
+              Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ProjectName}-vectors/*"
+            - Effect: Allow
+              Action:
+                - "sagemaker:InvokeEndpoint"
+                - "bedrock:InvokeModel"
+              Resource: "*"
+
+  IndexingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ..
+      Handler: backend.handlers.indexing_handler.handler
+      Timeout: 300
+      MemorySize: 2048
+      Events:
+        RawUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uspto/fulltext/
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref RawDataBucket
+        - Statement:
+            - Effect: Allow
+              Action: "es:ESHttp*"
+              Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ProjectName}-vectors/*"
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ..
+      Handler: backend.handlers.auth_handler.handler
+      Events:
+        Signup:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/signup, Method: post }
+        Confirm:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/confirm, Method: post }
+        Login:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/login, Method: post }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - "cognito-idp:SignUp"
+                - "cognito-idp:ConfirmSignUp"
+                - "cognito-idp:InitiateAuth"
+              Resource: !GetAtt UserPool.Arn
+
+Outputs:
+  ApiBaseUrl:
+    Description: Invoke URL to configure in frontend/js/config.js
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  RawDataBucketName:
+    Value: !Ref RawDataBucket
+  FrontendBucketWebsiteUrl:
+    Value: !GetAtt FrontendBucket.WebsiteURL
+  OpenSearchEndpoint:
+    Value: !GetAtt OpenSearchDomain.DomainEndpoint
+  CognitoUserPoolId:
+    Value: !Ref UserPool
+  CognitoAppClientId:
+    Value: !Ref UserPoolClient

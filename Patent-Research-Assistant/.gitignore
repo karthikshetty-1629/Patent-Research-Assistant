@@ -1,0 +1,32 @@
+# Environment / secrets
+.env
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data artifacts (raw XML, split docs, parquet, indexes) - never commit bulk data
+data/
+*.xml
+!schemas/*.dtd
+*.parquet
+error.log
+*.log
+
+# AWS SAM build output
+.aws-sam/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

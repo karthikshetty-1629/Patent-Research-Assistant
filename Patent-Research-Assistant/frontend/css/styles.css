@@ -1,0 +1,124 @@
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --text: #1a1d23;
+  --muted: #5f6672;
+  --border: #e3e6ea;
+  --accent: #2f5bea;
+  --accent-contrast: #ffffff;
+}
+
+[data-theme="dark"] {
+  --bg: #14161a;
+  --surface: #1d2026;
+  --text: #eceef1;
+  --muted: #9aa1ac;
+  --border: #2b2f37;
+  --accent: #6d8dff;
+  --accent-contrast: #0c0d10;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.navbar-brand {
+  font-weight: 700;
+  color: var(--text) !important;
+}
+
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+.search-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.search-input-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.search-input-group input {
+  background-color: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.mic-button {
+  border: 1px solid var(--border);
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+.mic-button.listening {
+  background-color: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+
+.result-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-top: 1rem;
+}
+
+.result-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.badge-score {
+  background-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.answer-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+  white-space: pre-wrap;
+}
+
+.auth-card {
+  max-width: 420px;
+  margin: 4rem auto;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+}
+
+.form-control {
+  background-color: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.form-control:focus {
+  background-color: var(--bg);
+  color: var(--text);
+}

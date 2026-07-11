@@ -1,0 +1,7 @@
+boto3
+python-dotenv
+langchain-core
+opensearch-py
+requests-aws4auth
+sentence-transformers
+huggingface_hub

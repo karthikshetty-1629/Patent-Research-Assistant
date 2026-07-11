@@ -1,6 +1,17 @@
+# Data processing pipeline
 boto3
 pandas
 pyarrow
 numpy
 tqdm
 python-dotenv
+requests
+beautifulsoup4
+xmltodict
+
+# RAG backend (embeddings, vector store, LLM, chains)
+langchain-core
+opensearch-py
+requests-aws4auth
+sentence-transformers
+huggingface_hub
